@@ -2654,6 +2654,10 @@ class WikiPage implements Page, IDBAccessObject {
 	) {
 		wfDebug( __METHOD__ . "\n" );
 
+		// Capture values for logging before ->loadPageData() calls Title->loadFromRow().
+		$debugTitleExists = $this->getTitle()->exists();
+		$debugTitleId = $this->getTitle()->getArticleID();
+
 		$status = Status::newGood();
 
 		$dbw = wfGetDB( DB_MASTER );
@@ -2667,6 +2671,32 @@ class WikiPage implements Page, IDBAccessObject {
 		// row and CAS check on page_latest to see if the trx snapshot matches.
 		$lockedLatest = $this->lockAndGetLatest();
 		if ( $id == 0 || $this->getLatest() != $lockedLatest ) {
+			// Temporary logging for debugging T210739. If that bug is closed,
+			// this (and $debugTitleExists/$debugTitleId above) should be removed.
+			if ( $id == 0 ) {
+				$idCond = [ 'page_id' => $debugTitleId ];
+				$rowById = $dbw->selectRow( 'page', '*', $idCond, __METHOD__ );
+				$rowByIdNoIso = $dbw->selectRow( 'page', '*', $idCond, __METHOD__, [ 'LOCK IN SHARE MODE' ] );
+				$nCond = [
+					'page_namespace' => $this->getTitle()->getNamespace(),
+					'page_title' => $this->getTitle()->getDBkey()
+				];
+				$rowByName = $dbw->selectRow( 'page', '*', $nCond, __METHOD__ );
+				$rowByNameNoIso = $dbw->selectRow( 'page', '*', $nCond, __METHOD__, [ 'LOCK IN SHARE MODE' ] );
+				wfDebugLog( 'AdHocDebug', 'T210739: Cannot delete {title}', 'all', [
+					'title' => $this->getTitle()->getPrefixedText(),
+					'id' => $id,
+					'getLatest' => $this->getLatest(),
+					'lockedLatest' => $lockedLatest,
+					'titleExists' => $debugTitleExists,
+					'titleId' => $debugTitleId,
+					'pageById' => $rowById,
+					'pageByIdNoIso' => $rowByIdNoIso,
+					'pageByName' => $rowByName,
+					'pageByNameNoIso' => $rowByNameNoIso,
+				] );
+			}
+
 			$dbw->endAtomic( __METHOD__ );
 			// Page not there or trx snapshot is stale
 			$status->error( 'cannotdelete',
