@@ -2683,6 +2683,17 @@ class WikiPage implements Page, IDBAccessObject {
 				];
 				$rowByName = $dbw->selectRow( 'page', '*', $nCond, __METHOD__ );
 				$rowByNameNoIso = $dbw->selectRow( 'page', '*', $nCond, __METHOD__, [ 'LOCK IN SHARE MODE' ] );
+				$arCond = [
+					'ar_namespace' => $this->getTitle()->getNamespace(),
+					'ar_title' => $this->getTitle()->getDBkey()
+				];
+				$arByName = $dbw->selectRow( 'archive', '*', $arCond, __METHOD__, [
+					'ORDER BY' => 'ar_timestamp DESC', 'LIMIT' => 1,
+				] );
+				$arByNameNoIso = $dbw->selectRow( 'archive', '*', $arCond, __METHOD__, [
+					'LOCK IN SHARE MODE',
+					'ORDER BY' => 'ar_timestamp DESC', 'LIMIT' => 1,
+				] );
 				wfDebugLog( 'AdHocDebug', 'T210739: Cannot delete {title}', 'all', [
 					'title' => $this->getTitle()->getPrefixedText(),
 					'id' => $id,
@@ -2694,6 +2705,8 @@ class WikiPage implements Page, IDBAccessObject {
 					'pageByIdNoIso' => $rowByIdNoIso,
 					'pageByName' => $rowByName,
 					'pageByNameNoIso' => $rowByNameNoIso,
+					'archiveByName' => $arByName,
+					'archiveByNameNoIso' => $arByNameNoIso,
 				] );
 			}
 
@@ -2791,6 +2804,28 @@ class WikiPage implements Page, IDBAccessObject {
 
 			// Now that it's safely backed up, delete it
 			$dbw->delete( 'page', [ 'page_id' => $id ], __METHOD__ );
+
+			// Temporary logging for debugging T210739. If that bug is closed,
+			// this should be removed. Note this won't catch PHP fatals
+			// dropping the DB connection causing a rollback, but so far there
+			// hasn't been any sign of that unless it's the 60-second request
+			// timeout.
+			$deletedAt = wfTimestamp( TS_ISO_8601 );
+			$deletedTrace = wfBacktrace( true );
+			$dbw->onTransactionResolution(
+				function ( $trigger ) use ( $id, $deletedAt, $deletedTrace ) {
+					if ( $trigger === IDatabase::TRIGGER_ROLLBACK ) {
+						wfDebugLog( 'AdHocDebug', 'T210739: Rolled back deletion of {title}', 'all', [
+							'title' => $this->getTitle()->getPrefixedText(),
+							'pageId' => $id,
+							'deletedAt' => $deletedAt,
+							'deletedTrace' => $deletedTrace,
+							'rollbackTrace' => wfBacktrace( true ),
+						] );
+					}
+				},
+				__METHOD__
+			);
 
 			// Log the deletion, if the page was suppressed, put it in the suppression log instead
 			$logtype = $suppress ? 'suppress' : 'delete';
