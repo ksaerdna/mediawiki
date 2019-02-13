@@ -742,3 +742,6 @@
 	path = extensions/CentralNotice
 	url = https://gerrit.wikimedia.org/r/mediawiki/extensions/CentralNotice
 	branch = wmf_deploy
+[submodule "extensions/ExternalGuidance"]
+	path = extensions/ExternalGuidance
+	url = https://gerrit.wikimedia.org/r/p/mediawiki/extensions/ExternalGuidance.git
